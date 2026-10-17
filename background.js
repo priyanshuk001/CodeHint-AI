@@ -109,13 +109,19 @@ async function getAIHelp(problemDetails, settings) {
   let prompt = constructPrompt(problemDetails, assistanceType);
 
   // Call the appropriate AI API
+  let result;
   if (aiProvider === "openai") {
-    return await callOpenAI(prompt, apiKey);
+    result = await callOpenAI(prompt, apiKey);
   } else if (aiProvider === "gemini") {
-    return await callGemini(prompt, apiKey);
+    result = await callGemini(prompt, apiKey);
   } else {
     throw new Error("Invalid AI provider");
   }
+
+  if (assistanceType === "solution" && result && result.content) {
+    result.content = keepOnlyCode(result.content);
+  }
+  return result;
 }
 
 /**
@@ -405,17 +411,15 @@ function constructPrompt(problemDetails, assistanceType) {
       break;
     case "solution":
       prompt += `
-        Please provide a complete solution to this problem in ${detectedLanguage}.
-        Include:
-        1. The intuition behind the solution
-        2. The algorithm in plain English
-        3. The code implementation in ${detectedLanguage} (make sure it's correct and optimized)
-        4. Time and space complexity analysis
-        5. Explanation of how the solution handles all test cases
+        Write the complete solution to this problem in ${detectedLanguage}.
 
-        Format the code solution between triple backticks.
-        Make sure the solution is correct and handles all edge cases mentioned in the constraints.
-        IMPORTANT: The solution MUST be written in ${detectedLanguage} programming language.
+        OUTPUT RULES (very important):
+        - Reply with ONLY one fenced code block (triple backticks) that holds the full, correct, ready-to-submit code.
+        - Do NOT write any explanation, introduction, headings, complexity analysis, or any text before or after the code block.
+        - Do NOT add comments inside the code unless they are really needed.
+        - If starter code or a function signature is given, complete that function/class and keep its signature.
+        - If the problem reads from standard input and prints to standard output (like Codeforces or CodeChef), write a full program that does this.
+        - The solution MUST be written in ${detectedLanguage}, be efficient, and handle all edge cases in the constraints.
       `;
       break;
     case "optimize":
@@ -503,6 +507,20 @@ function getPromptLanguage(problemDetails) {
   return language && language !== "unknown" ? language : "the language selected in the code editor";
 }
 
+const TRUNCATION_NOTE =
+  "\n\n_The answer was cut off because it reached the length limit. Please try again._";
+
+/**
+ * "Solution" must be code only. If the AI added text around the code block anyway,
+ * keep just the first complete code block.
+ */
+function keepOnlyCode(content) {
+  const text = String(content || "");
+  const closed = text.match(/```([\w+#.-]*)[ \t]*\r?\n([\s\S]*?)```/);
+  if (!closed) return text; // no complete code block (for example a cut-off answer): leave as it is
+  return "```" + closed[1] + "\n" + closed[2].replace(/\s+$/, "") + "\n```";
+}
+
 async function callOpenAI(prompt, apiKey) {
   let lastModelError = null;
 
@@ -519,7 +537,7 @@ async function callOpenAI(prompt, apiKey) {
           {
             role: "system",
             content:
-              "You are an expert algorithm and data structure specialist helping to solve competitive programming and coding interview problems. You provide clear, concise, and correct solutions with detailed explanations. Always respect the programming language specified in the user's prompt and provide solutions in that language only. Do not switch to Java or any other language unless that exact language was requested.",
+              "You are an expert algorithm and data structure specialist helping to solve competitive programming and coding interview problems. You write clear, correct solutions. Follow the output format requested in the prompt exactly; if the prompt asks for code only, reply with only the code block. Always respect the programming language specified in the user's prompt and provide solutions in that language only. Do not switch to Java or any other language unless that exact language was requested.",
           },
           {
             role: "user",
@@ -527,7 +545,7 @@ async function callOpenAI(prompt, apiKey) {
           },
         ],
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: 8000,
       }),
     });
 
@@ -545,8 +563,12 @@ async function callOpenAI(prompt, apiKey) {
       throw new Error(errorMessage);
     }
 
+    const choice = data.choices && data.choices[0];
+    const answer = choice && choice.message ? choice.message.content : "";
+    if (!answer) throw new Error("The AI returned an empty answer. Please try again.");
+
     return {
-      content: data.choices[0].message.content,
+      content: answer + (choice.finish_reason === "length" ? TRUNCATION_NOTE : ""),
       model,
     };
   }
@@ -609,14 +631,14 @@ async function callGemini(prompt, apiKey) {
             {
               parts: [
                 {
-                  text: `You are an expert algorithm and data structure specialist helping to solve competitive programming and coding interview problems. You provide clear, concise, and correct solutions with detailed explanations. Always respect the programming language specified in the prompt and provide solutions in that language only. Do not switch to Java or any other language unless that exact language was requested.\n\n${prompt}`,
+                  text: `You are an expert algorithm and data structure specialist helping to solve competitive programming and coding interview problems. You write clear, correct solutions. Follow the output format requested in the prompt exactly; if the prompt asks for code only, reply with only the code block. Always respect the programming language specified in the prompt and provide solutions in that language only. Do not switch to Java or any other language unless that exact language was requested.\n\n${prompt}`,
                 },
               ],
             },
           ],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 4000,
+            maxOutputTokens: 16384, // Gemini 2.5 'thinking' also uses this budget
           },
         }),
       }
@@ -642,8 +664,24 @@ async function callGemini(prompt, apiKey) {
       throw new Error(errorMessage);
     }
 
+    const candidate = data.candidates && data.candidates[0];
+    const parts = (candidate && candidate.content && candidate.content.parts) || [];
+    const answer = parts
+      .filter((part) => !part.thought)
+      .map((part) => part.text || "")
+      .join("");
+    const cutOff = candidate && candidate.finishReason === "MAX_TOKENS";
+
+    if (!answer) {
+      throw new Error(
+        cutOff
+          ? "The AI used all its output length before it could answer. Please try again."
+          : "The AI returned an empty answer. Please try again."
+      );
+    }
+
     return {
-      content: data.candidates[0].content.parts[0].text,
+      content: answer + (cutOff ? TRUNCATION_NOTE : ""),
       model,
     };
   }
