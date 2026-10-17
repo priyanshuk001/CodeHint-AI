@@ -24,9 +24,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   return true;
 });
 
-// Inject the in-page assistant when the page loads.
-document.addEventListener("DOMContentLoaded", injectAssistantShell);
-injectAssistantShell();
 
 // ---------------------------------------------------------------------------
 // Site adapter bridge: the panel never reads a website directly.
@@ -66,7 +63,16 @@ function insertCodeToEditor(code) {
 let codeHintState = {
   lastResponse: "",
   lastModel: "",
+  requestId: 0, // lets us ignore an old answer when a newer request was started
 };
+
+// Floating button: which edge it sits on, and how far down (0 = top, 1 = bottom).
+const CODEHINT_BUTTON_SIZE = 46;
+const CODEHINT_EDGE_GAP = 12;
+let codeHintButtonPos = { side: "right", topRatio: 0.17 };
+
+// Timer shown while we wait for the AI.
+let codeHintTimer = { id: null, startedAt: 0 };
 
 /**
  * Injects a fixed assistant launcher and side panel on supported problem pages.
@@ -102,6 +108,9 @@ function injectAssistantShell() {
       position: fixed;
       top: 146px;
       right: 22px;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
       width: 46px;
       height: 46px;
       border-radius: 12px;
@@ -110,9 +119,10 @@ function injectAssistantShell() {
       display: flex;
       align-items: center;
       justify-content: center;
-      cursor: pointer;
+      cursor: grab;
       box-shadow: 0 10px 30px rgba(37, 99, 235, 0.28);
       z-index: 10000;
+      padding: 0;
       transition: transform 0.2s ease, box-shadow 0.2s ease;
       border: 1px solid rgba(255, 255, 255, 0.45);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -127,6 +137,18 @@ function injectAssistantShell() {
       background: #172033;
     }
 
+    /* after you let go, the button glides to the nearest screen edge */
+    #codehint-assistant-button.codehint-snapping {
+      transition: left 0.22s ease, top 0.22s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    #codehint-assistant-button.codehint-dragging {
+      cursor: grabbing;
+      transition: none;
+      transform: scale(1.08);
+      box-shadow: 0 18px 40px rgba(37, 99, 235, 0.4);
+    }
+
     .codehint-button-mark {
       font-size: 20px;
       font-weight: 800;
@@ -136,10 +158,13 @@ function injectAssistantShell() {
 
     #codehint-assistant-panel {
       position: fixed;
-      top: 140px;
-      right: 82px;
-      width: min(420px, calc(100vw - 28px));
-      max-height: calc(100vh - 112px);
+      top: 12px;
+      left: 12px;
+      /* real size and place are set by positionAssistantPanel() so it sits beside the button */
+      width: min(420px, calc(100vw - 24px));
+      height: min(660px, calc(100vh - 24px));
+      display: flex;
+      flex-direction: column;
       background: var(--chai-surface);
       border: 1px solid var(--chai-border);
       border-radius: 8px;
@@ -148,15 +173,15 @@ function injectAssistantShell() {
       color: var(--chai-text);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       overflow: hidden;
-      transform: translateY(-8px);
+      transform: scale(0.94);
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.2s ease, transform 0.2s ease;
+      transition: opacity 0.18s ease, transform 0.18s ease;
     }
 
     #codehint-assistant-panel.codehint-open {
       opacity: 1;
-      transform: translateY(0);
+      transform: scale(1);
       pointer-events: auto;
     }
 
@@ -168,6 +193,7 @@ function injectAssistantShell() {
       padding: 14px 16px;
       background: #f8fafc;
       border-bottom: 1px solid var(--chai-border);
+      flex: 0 0 auto;
     }
 
     .codehint-title {
@@ -221,9 +247,12 @@ function injectAssistantShell() {
     }
 
     .codehint-panel-body {
-      padding: 14px 16px 16px;
+      padding: 14px 16px 12px;
       overflow: auto;
-      max-height: calc(100vh - 176px);
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
       background: var(--chai-bg);
     }
 
@@ -232,6 +261,7 @@ function injectAssistantShell() {
       grid-template-columns: 1fr;
       gap: 10px;
       margin-bottom: 14px;
+      flex: 0 0 auto;
     }
 
     .codehint-field {
@@ -286,6 +316,7 @@ function injectAssistantShell() {
       grid-template-columns: repeat(3, 1fr);
       gap: 8px;
       margin-bottom: 12px;
+      flex: 0 0 auto;
     }
 
     .codehint-action {
@@ -341,8 +372,8 @@ function injectAssistantShell() {
     }
 
     .codehint-response {
-      min-height: 190px;
-      max-height: 380px;
+      flex: 1 1 200px;
+      min-height: 140px;
       overflow: auto;
       border: 1px solid var(--chai-border);
       border-radius: 8px;
@@ -377,6 +408,7 @@ function injectAssistantShell() {
 
     .codehint-meta {
       margin: 8px 0 0;
+      flex: 0 0 auto;
       min-height: 16px;
       color: var(--chai-muted);
       font-size: 12px;
@@ -385,7 +417,46 @@ function injectAssistantShell() {
     .codehint-footer-actions {
       display: flex;
       gap: 8px;
-      margin-top: 12px;
+      flex: 0 0 auto;
+      padding: 10px 16px 14px;
+      border-top: 1px solid var(--chai-border);
+      background: var(--chai-bg);
+    }
+
+    /* waiting indicator + timer */
+    .codehint-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      color: var(--chai-muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .codehint-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid #cbd5e1;
+      border-top-color: var(--chai-primary);
+      border-radius: 50%;
+      animation: codehint-spin 0.8s linear infinite;
+    }
+
+    .codehint-timer {
+      min-width: 38px;
+      text-align: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e8eef7;
+      color: var(--chai-text);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    @keyframes codehint-spin {
+      to { transform: rotate(360deg); }
     }
 
     .codehint-secondary {
@@ -410,16 +481,6 @@ function injectAssistantShell() {
     }
 
     @media (max-width: 768px) {
-      #codehint-assistant-button {
-        top: 132px;
-        right: 14px;
-      }
-
-      #codehint-assistant-panel {
-        top: 186px;
-        right: 14px;
-      }
-
       .codehint-actions {
         grid-template-columns: repeat(2, 1fr);
       }
@@ -475,10 +536,10 @@ function injectAssistantShell() {
         Choose an action to generate help for this problem.
       </div>
       <div id="codehint-meta" class="codehint-meta"></div>
-      <div class="codehint-footer-actions">
-        <button class="codehint-secondary" id="codehint-copy" type="button">Copy</button>
-        <button class="codehint-secondary" id="codehint-insert" type="button">Insert Code</button>
-      </div>
+    </div>
+    <div class="codehint-footer-actions">
+      <button class="codehint-secondary" id="codehint-copy" type="button">Copy</button>
+      <button class="codehint-secondary" id="codehint-insert" type="button">Insert Code</button>
     </div>
   `;
 
@@ -486,7 +547,14 @@ function injectAssistantShell() {
   document.body.appendChild(launcher);
   document.body.appendChild(panel);
 
-  launcher.addEventListener("click", toggleAssistantPanel);
+  setupAssistantButtonDrag(launcher);
+  placeAssistantButton(false);
+  loadAssistantButtonPosition();
+  window.addEventListener("resize", function () {
+    placeAssistantButton(false);
+    if (panel.classList.contains("codehint-open")) positionAssistantPanel();
+  });
+
   panel.querySelector("#codehint-close").addEventListener("click", closeAssistantPanel);
   panel.querySelector("#codehint-save").addEventListener("click", saveAssistantSettings);
   panel.querySelector("#codehint-copy").addEventListener("click", copyAssistantResponse);
@@ -501,8 +569,200 @@ function injectAssistantShell() {
 function toggleAssistantPanel() {
   const panel = document.getElementById("codehint-assistant-panel");
   const launcher = document.getElementById("codehint-assistant-button");
+  positionAssistantPanel(); // place it next to the button before it appears
   const isOpen = panel.classList.toggle("codehint-open");
   launcher.classList.toggle("codehint-open", isOpen);
+}
+
+// ---------------------------------------------------------------------------
+// Floating button: drag it anywhere, it snaps to the nearest left/right edge,
+// remembers its place, and the window always opens beside it.
+// ---------------------------------------------------------------------------
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+function getViewportSize() {
+  return {
+    width: document.documentElement.clientWidth || window.innerWidth,
+    height: document.documentElement.clientHeight || window.innerHeight,
+  };
+}
+
+function placeAssistantButton(animate) {
+  const launcher = document.getElementById("codehint-assistant-button");
+  if (!launcher) return;
+
+  const viewport = getViewportSize();
+  const size = CODEHINT_BUTTON_SIZE;
+  const gap = CODEHINT_EDGE_GAP;
+  const left = codeHintButtonPos.side === "left" ? gap : viewport.width - size - gap;
+  const top = clampNumber(
+    Math.round(codeHintButtonPos.topRatio * (viewport.height - size)),
+    gap,
+    viewport.height - size - gap
+  );
+
+  launcher.classList.toggle("codehint-snapping", !!animate);
+  launcher.style.right = "auto";
+  launcher.style.left = left + "px";
+  launcher.style.top = top + "px";
+}
+
+function loadAssistantButtonPosition() {
+  try {
+    chrome.storage.local.get("codehintButton", function (data) {
+      const saved = data && data.codehintButton;
+      if (saved && (saved.side === "left" || saved.side === "right") && typeof saved.topRatio === "number") {
+        codeHintButtonPos = { side: saved.side, topRatio: clampNumber(saved.topRatio, 0, 1) };
+        placeAssistantButton(false);
+      }
+    });
+  } catch (error) {
+    // storage not available: keep the default place
+  }
+}
+
+function saveAssistantButtonPosition() {
+  try {
+    chrome.storage.local.set({ codehintButton: codeHintButtonPos });
+  } catch (error) {
+    // not important
+  }
+}
+
+function getAssistantButtonBox() {
+  const launcher = document.getElementById("codehint-assistant-button");
+  const rect = launcher.getBoundingClientRect();
+  const left = parseFloat(launcher.style.left);
+  const top = parseFloat(launcher.style.top);
+  return {
+    left: isNaN(left) ? rect.left : left,
+    top: isNaN(top) ? rect.top : top,
+    width: rect.width || CODEHINT_BUTTON_SIZE,
+    height: rect.height || CODEHINT_BUTTON_SIZE,
+  };
+}
+
+/**
+ * Puts the window next to the button and makes it fit the screen:
+ * - button on the right  -> window opens to its left (and the other way round)
+ * - window is centred on the button, but never leaves the screen
+ * - small screens: the window is centred
+ */
+function positionAssistantPanel() {
+  const panel = document.getElementById("codehint-assistant-panel");
+  if (!panel || !document.getElementById("codehint-assistant-button")) return;
+
+  const viewport = getViewportSize();
+  const margin = 12;
+  const gap = 12;
+  const width = Math.min(420, viewport.width - margin * 2);
+  const height = Math.min(660, viewport.height - margin * 2);
+  const box = getAssistantButtonBox();
+
+  let left;
+  if (box.left - gap - width >= margin) {
+    left = box.left - gap - width; // room on the left of the button
+  } else if (box.left + box.width + gap + width <= viewport.width - margin) {
+    left = box.left + box.width + gap; // room on the right of the button
+  } else {
+    left = Math.round((viewport.width - width) / 2); // small screen
+  }
+
+  const top = clampNumber(
+    Math.round(box.top + box.height / 2 - height / 2),
+    margin,
+    viewport.height - height - margin
+  );
+
+  panel.style.width = width + "px";
+  panel.style.height = height + "px";
+  panel.style.left = left + "px";
+  panel.style.top = top + "px";
+  // the window grows out of the button
+  panel.style.transformOrigin =
+    Math.round(box.left + box.width / 2 - left) + "px " + Math.round(box.top + box.height / 2 - top) + "px";
+}
+
+function setupAssistantButtonDrag(launcher) {
+  let dragging = false;
+  let moved = false;
+  let startX = 0;
+  let startY = 0;
+  let originLeft = 0;
+  let originTop = 0;
+  let pointerId = null;
+
+  launcher.addEventListener("pointerdown", function (event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const rect = launcher.getBoundingClientRect();
+    dragging = true;
+    moved = false;
+    startX = event.clientX;
+    startY = event.clientY;
+    originLeft = rect.left;
+    originTop = rect.top;
+    pointerId = event.pointerId;
+    try {
+      launcher.setPointerCapture(pointerId);
+    } catch (error) {}
+    launcher.classList.remove("codehint-snapping");
+  });
+
+  launcher.addEventListener("pointermove", function (event) {
+    if (!dragging) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (!moved && Math.hypot(dx, dy) < 5) return; // a tiny move is still a click
+
+    moved = true;
+    launcher.classList.add("codehint-dragging");
+    const viewport = getViewportSize();
+    const size = CODEHINT_BUTTON_SIZE;
+    launcher.style.right = "auto";
+    launcher.style.left = clampNumber(originLeft + dx, 0, viewport.width - size) + "px";
+    launcher.style.top = clampNumber(originTop + dy, 0, viewport.height - size) + "px";
+
+    const panel = document.getElementById("codehint-assistant-panel");
+    if (panel && panel.classList.contains("codehint-open")) positionAssistantPanel();
+  });
+
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    try {
+      launcher.releasePointerCapture(pointerId);
+    } catch (error) {}
+    launcher.classList.remove("codehint-dragging");
+    if (!moved) return;
+
+    // remember the nearest edge and the height, then glide there
+    const viewport = getViewportSize();
+    const size = CODEHINT_BUTTON_SIZE;
+    const left = parseFloat(launcher.style.left) || 0;
+    const top = parseFloat(launcher.style.top) || 0;
+    codeHintButtonPos = {
+      side: left + size / 2 < viewport.width / 2 ? "left" : "right",
+      topRatio: clampNumber(top / Math.max(1, viewport.height - size), 0, 1),
+    };
+    saveAssistantButtonPosition();
+    placeAssistantButton(true);
+
+    const panel = document.getElementById("codehint-assistant-panel");
+    if (panel && panel.classList.contains("codehint-open")) positionAssistantPanel();
+  }
+
+  launcher.addEventListener("pointerup", endDrag);
+  launcher.addEventListener("pointercancel", endDrag);
+
+  launcher.addEventListener("click", function () {
+    if (moved) {
+      moved = false; // this click is the end of a drag, not a tap
+      return;
+    }
+    toggleAssistantPanel();
+  });
 }
 
 function closeAssistantPanel() {
@@ -534,31 +794,69 @@ function saveAssistantSettings() {
   });
 }
 
+function formatDuration(ms, precise) {
+  const seconds = ms / 1000;
+  if (seconds < 60) return (precise ? seconds.toFixed(1) : Math.floor(seconds)) + "s";
+  const minutes = Math.floor(seconds / 60);
+  return minutes + "m " + String(Math.floor(seconds % 60)).padStart(2, "0") + "s";
+}
+
+function stopLoadingTimer() {
+  if (!codeHintTimer.id) return 0;
+  clearInterval(codeHintTimer.id);
+  codeHintTimer.id = null;
+  return Date.now() - codeHintTimer.startedAt;
+}
+
 function setAssistantLoading(message) {
   const response = document.getElementById("codehint-response");
   const meta = document.getElementById("codehint-meta");
   response.classList.add("empty");
-  response.textContent = message;
+  response.innerHTML =
+    '<div class="codehint-loading">' +
+    '<span class="codehint-spinner"></span>' +
+    '<span class="codehint-loading-text"></span>' +
+    '<span class="codehint-timer">0s</span>' +
+    "</div>";
+  response.querySelector(".codehint-loading-text").textContent = message;
   if (meta) meta.textContent = "";
+
+  // count the seconds while we wait for the AI
+  stopLoadingTimer();
+  const timerEl = response.querySelector(".codehint-timer");
+  codeHintTimer.startedAt = Date.now();
+  codeHintTimer.id = setInterval(function () {
+    timerEl.textContent = formatDuration(Date.now() - codeHintTimer.startedAt, false);
+  }, 250);
 }
 
 function setAssistantResponse(content, model) {
   codeHintState.lastResponse = content || "";
   codeHintState.lastModel = model || "";
 
+  const elapsed = stopLoadingTimer();
   const response = document.getElementById("codehint-response");
   const meta = document.getElementById("codehint-meta");
   response.classList.remove("empty");
   response.innerHTML = formatAssistantMarkdown(content || "No response received.");
-  if (meta) meta.textContent = model ? `Generated by ${model}` : "";
+  response.scrollTop = 0;
+  if (meta) {
+    meta.textContent = [
+      model ? `Generated by ${model}` : "",
+      elapsed ? `took ${formatDuration(elapsed, true)}` : "",
+    ]
+      .filter(Boolean)
+      .join(" \u00b7 ");
+  }
 }
 
 function setAssistantError(message) {
+  const elapsed = stopLoadingTimer();
   const response = document.getElementById("codehint-response");
   const meta = document.getElementById("codehint-meta");
   response.classList.remove("empty");
   response.innerHTML = `<strong style="color: var(--chai-danger);">Error</strong><p>${escapeHtml(message)}</p>`;
-  if (meta) meta.textContent = "";
+  if (meta) meta.textContent = elapsed ? `stopped after ${formatDuration(elapsed, true)}` : "";
 }
 
 function formatAssistantMarkdown(content) {
@@ -615,6 +913,7 @@ function runAssistantAction(action) {
   }
 
   chrome.storage.sync.set(settings);
+  const requestId = ++codeHintState.requestId;
   setAssistantLoading(`${getActionLabel(action)}...`);
 
   const problemDetails = extractProblemDetails();
@@ -646,6 +945,8 @@ function runAssistantAction(action) {
   }
 
   chrome.runtime.sendMessage(payload, function (aiResponse) {
+    if (requestId !== codeHintState.requestId) return; // a newer request replaced this one
+
     if (chrome.runtime.lastError) {
       setAssistantError(chrome.runtime.lastError.message);
       return;
@@ -792,3 +1093,8 @@ function showNotification(message, type = "info") {
     document.head.appendChild(style);
   }
 }
+
+// Start the in-page assistant. This stays at the END of the file so every
+// constant and function above is defined before it runs.
+document.addEventListener("DOMContentLoaded", injectAssistantShell);
+injectAssistantShell();
