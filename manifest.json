@@ -9,7 +9,15 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://leetcode.com/*"
+    "https://leetcode.com/problems/*",
+    "https://codeforces.com/problemset/problem/*",
+    "https://codeforces.com/contest/*/problem/*",
+    "https://codeforces.com/gym/*/problem/*",
+    "https://www.codechef.com/problems/*",
+    "https://www.codechef.com/*/problems/*",
+    "https://www.geeksforgeeks.org/problems/*",
+    "https://practice.geeksforgeeks.org/problems/*",
+    "https://www.interviewbit.com/problems/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -22,11 +30,43 @@
   "content_scripts": [
     {
       "matches": [
-        "https://leetcode.com/problems/*"
+        "https://leetcode.com/problems/*",
+        "https://codeforces.com/problemset/problem/*",
+        "https://codeforces.com/contest/*/problem/*",
+        "https://codeforces.com/gym/*/problem/*",
+        "https://www.codechef.com/problems/*",
+        "https://www.codechef.com/*/problems/*",
+        "https://www.geeksforgeeks.org/problems/*",
+        "https://practice.geeksforgeeks.org/problems/*",
+        "https://www.interviewbit.com/problems/*"
+      ],
+      "js": [
+        "core/page-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://leetcode.com/problems/*",
+        "https://codeforces.com/problemset/problem/*",
+        "https://codeforces.com/contest/*/problem/*",
+        "https://codeforces.com/gym/*/problem/*",
+        "https://www.codechef.com/problems/*",
+        "https://www.codechef.com/*/problems/*",
+        "https://www.geeksforgeeks.org/problems/*",
+        "https://practice.geeksforgeeks.org/problems/*",
+        "https://www.interviewbit.com/problems/*"
       ],
       "js": [
         "core/registry.js",
+        "core/site-utils.js",
+        "core/editors.js",
         "sites/leetcode.js",
+        "sites/codeforces.js",
+        "sites/codechef.js",
+        "sites/gfg.js",
+        "sites/interviewbit.js",
         "content.js"
       ],
       "run_at": "document_end",
@@ -47,8 +87,14 @@
         "assets/*"
       ],
       "matches": [
-        "https://leetcode.com/*"
+        "https://leetcode.com/*",
+        "https://codeforces.com/*",
+        "https://www.codechef.com/*",
+        "https://www.geeksforgeeks.org/*",
+        "https://practice.geeksforgeeks.org/*",
+        "https://www.interviewbit.com/*"
       ]
     }
-  ]
+  ],
+  "minimum_chrome_version": "111"
 }

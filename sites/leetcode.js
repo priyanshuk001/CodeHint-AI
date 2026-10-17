@@ -786,8 +786,9 @@ function insertCodeToEditor(code) {
     name: "LeetCode",
     matches: (url) => /^https:\/\/leetcode\.com\/problems\//.test(url),
     getProblem: extractProblemDetails,
-    getCode: extractCurrentCode,
-    setCode: insertCodeToEditor,
+    // The shared editor bridge reads the whole editor model; the old DOM code is the backup.
+    getCode: () => window.CodeHintEditors.getCode() || extractCurrentCode(),
+    setCode: (code) => window.CodeHintEditors.setCode(code) || insertCodeToEditor(code),
     getTestCases: extractTestCases,
     getSubmissionResults: extractSubmissionResults,
   });

@@ -100,7 +100,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 });
 
 /**
- * Get help from AI for a LeetCode problem
+ * Get help from AI for a coding problem
  */
 async function getAIHelp(problemDetails, settings) {
   const { aiProvider, apiKey, assistanceType } = settings;
@@ -129,7 +129,7 @@ async function optimizeCode(code, settings, problemDetails = null) {
 
   // Construct prompt for code optimization
   let prompt = `
-    I have the following code for a LeetCode problem:
+    I have the following code for a coding problem:
 
     \`\`\`
     ${code}
@@ -153,7 +153,7 @@ async function optimizeCode(code, settings, problemDetails = null) {
     const detectedLanguage = getPromptLanguage(problemDetails);
 
     prompt = `
-      LeetCode Problem: ${title}
+      ${getSiteName(problemDetails)} Problem: ${title}
       Difficulty: ${difficulty}
       Programming Language: ${detectedLanguage}
 
@@ -201,7 +201,7 @@ async function debugCode(code, testCases, settings, problemDetails = null) {
 
   // Construct prompt for debugging
   let prompt = `
-    I have the following code for a LeetCode problem that isn't working correctly:
+    I have the following code for a coding problem that isn't working correctly:
 
     \`\`\`
     ${code}
@@ -227,7 +227,7 @@ async function debugCode(code, testCases, settings, problemDetails = null) {
     const detectedLanguage = getPromptLanguage(problemDetails);
 
     prompt = `
-      LeetCode Problem: ${title}
+      ${getSiteName(problemDetails)} Problem: ${title}
       Difficulty: ${difficulty}
       Programming Language: ${detectedLanguage}
 
@@ -289,7 +289,7 @@ async function explainError(
 
   // Construct prompt for explaining error
   let prompt = `
-    I have the following code for a LeetCode problem that is giving an error:
+    I have the following code for a coding problem that is giving an error:
 
     \`\`\`
     ${code}
@@ -311,7 +311,7 @@ async function explainError(
     const detectedLanguage = getPromptLanguage(problemDetails);
 
     prompt = `
-      LeetCode Problem: ${title}
+      ${getSiteName(problemDetails)} Problem: ${title}
       Difficulty: ${difficulty}
       Programming Language: ${detectedLanguage}
 
@@ -360,7 +360,7 @@ function constructPrompt(problemDetails, assistanceType) {
   const detectedLanguage = getPromptLanguage(problemDetails);
 
   let prompt = `
-    LeetCode Problem: ${title}
+    ${getSiteName(problemDetails)} Problem: ${title}
     Difficulty: ${difficulty}
     Programming Language: ${detectedLanguage}
 
@@ -494,9 +494,13 @@ function isTemporaryProviderError(message, status) {
   );
 }
 
+function getSiteName(problemDetails) {
+  return (problemDetails && problemDetails.site) || "Coding";
+}
+
 function getPromptLanguage(problemDetails) {
   const language = problemDetails?.language;
-  return language && language !== "unknown" ? language : "the selected LeetCode editor language";
+  return language && language !== "unknown" ? language : "the language selected in the code editor";
 }
 
 async function callOpenAI(prompt, apiKey) {
@@ -515,7 +519,7 @@ async function callOpenAI(prompt, apiKey) {
           {
             role: "system",
             content:
-              "You are an expert algorithm and data structure specialist helping to solve LeetCode problems. You provide clear, concise, and correct solutions with detailed explanations. Always respect the programming language specified in the user's prompt and provide solutions in that language only. Do not switch to Java or any other language unless that exact language was requested.",
+              "You are an expert algorithm and data structure specialist helping to solve competitive programming and coding interview problems. You provide clear, concise, and correct solutions with detailed explanations. Always respect the programming language specified in the user's prompt and provide solutions in that language only. Do not switch to Java or any other language unless that exact language was requested.",
           },
           {
             role: "user",
@@ -605,7 +609,7 @@ async function callGemini(prompt, apiKey) {
             {
               parts: [
                 {
-                  text: `You are an expert algorithm and data structure specialist helping to solve LeetCode problems. You provide clear, concise, and correct solutions with detailed explanations. Always respect the programming language specified in the prompt and provide solutions in that language only. Do not switch to Java or any other language unless that exact language was requested.\n\n${prompt}`,
+                  text: `You are an expert algorithm and data structure specialist helping to solve competitive programming and coding interview problems. You provide clear, concise, and correct solutions with detailed explanations. Always respect the programming language specified in the prompt and provide solutions in that language only. Do not switch to Java or any other language unless that exact language was requested.\n\n${prompt}`,
                 },
               ],
             },
