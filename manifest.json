@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "LeetCode AI Assistant",
-  "version": "1.2",
-  "description": "AI-powered assistant to help solve LeetCode problems using OpenAI or Google Gemini",
+  "name": "CodeHint AI",
+  "version": "2.0",
+  "description": "AI hints, approaches, solutions and debugging for coding problems. Works with OpenAI or Google Gemini.",
   "permissions": [
     "activeTab",
     "storage",
@@ -21,8 +21,14 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://leetcode.com/problems/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://leetcode.com/problems/*"
+      ],
+      "js": [
+        "core/registry.js",
+        "sites/leetcode.js",
+        "content.js"
+      ],
       "run_at": "document_end",
       "css": []
     }
@@ -37,8 +43,12 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["assets/*"],
-      "matches": ["https://leetcode.com/*"]
+      "resources": [
+        "assets/*"
+      ],
+      "matches": [
+        "https://leetcode.com/*"
+      ]
     }
   ]
 }

@@ -704,7 +704,7 @@ function simulateExtensionClick(extensionId) {
 
   notification.innerHTML = `
     <div style="display: flex; align-items: center;">
-      <div style="flex: 1;">Opening LeetCode AI Assistant...</div>
+      <div style="flex: 1;">Opening CodeHint AI...</div>
       <div style="margin-left: 12px; cursor: pointer;" id="close-notification">✕</div>
     </div>
   `;

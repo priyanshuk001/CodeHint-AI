@@ -1,123 +1,53 @@
-# 🚀 LeetCode AI Assistant
+# CodeHint AI
 
-[!Version](https://github.com/your-repo)
-[!Manifest-V3]()
-[!License: MIT](https://opensource.org/licenses/MIT)
-[!AI-Powered]()
+AI hints, approaches, solutions and debugging help for coding problems, right inside the problem page.
+Works with your own OpenAI or Google Gemini API key.
 
-An advanced, context-aware Chrome extension designed to supercharge your competitive programming experience. LeetCode AI Assistant integrates directly into the LeetCode environment to provide real-time hints, optimized solutions, and debugging support using state-of-the-art LLMs.
+**Supported sites:** LeetCode (more coming: Codeforces, CodeChef, GeeksforGeeks, InterviewBit)
 
-## ✨ Key Features
+## Features
 
--   **Context-Aware Analysis**: Automatically extracts problem descriptions, constraints, examples, and your current code implementation.
--   **Dual-Provider Support**: Seamlessly switch between **OpenAI (GPT-4o)** and **Google Gemini (2.5/2.0 Flash)**.
--   **Intelligent Actions**:
-    -   **Hint**: Get a conceptual nudge without spoiling the solution.
-    -   **Approach**: Detailed algorithmic strategies and complexity analysis.
-    -   **Solution**: Full code implementation in your selected language.
-    -   **Optimize**: Refactor existing code for better time/space complexity.
-    -   **Debug**: Identify logic errors and edge-case failures.
-    -   **Explain**: Simplified breakdown of complex problem statements.
--   **Direct Editor Integration**: One-click insertion of AI-generated code directly into the LeetCode Monaco editor.
--   **Resilient Scraping**: Multi-selector fallback logic to ensure functionality across different LeetCode UI versions.
+- **Hint**: a small clue without spoiling the solution
+- **Approach**: the idea, steps and time/space complexity
+- **Solution**: full code in the language selected in your editor
+- **Optimize**: improve your current code
+- **Debug**: find mistakes in your current code
+- **Explain**: the problem in simple words
+- **Insert Code**: put the AI code into the editor with one click (where the site allows it)
 
-## 🏗 Project Architecture
+## Install (developer mode)
 
-The extension follows a decoupled architecture using the **Chrome Extension Manifest V3** standard:
+1. Download or clone this repository.
+2. Open `chrome://extensions/` and turn on **Developer mode**.
+3. Click **Load unpacked** and choose this folder.
+4. Open a problem, click the **AI** button, pick a provider, paste your API key and click **Save**.
 
-1.  **Content Script (`content.js`)**: 
-    -   Injects the floating AI Assistant UI into the DOM.
-    -   Performs "Page Context Discovery" by scraping the problem metadata (Title, Difficulty, Constraints).
-    -   Interacts with the LeetCode editor (Monaco/CodeMirror) to read and write code.
-2.  **Background Service Worker (`background.js`)**:
-    -   Acts as a secure proxy for API requests to OpenAI and Google Gemini.
-    -   Implements **Model Fallback Logic**: If a preferred model is unavailable, it automatically tries secondary models (e.g., `gemini-2.5-flash` → `gemini-2.0-flash`).
-3.  **Popup UI (`popup.js`/`popup.html`)**:
-    -   Manages persistent settings using `chrome.storage.sync`.
-    -   Provides an alternative interface for users who prefer the toolbar over the in-page overlay.
-4.  **Configuration Layer (`config.js`)**:
-    -   Centralizes default model parameters, temperatures, and token limits.
+## How the code is organised
 
-## 📂 Folder Structure
-
-```text
-.
-├── assets/                 # Extension icons and visual assets
-├── background.js           # Service worker handling API orchestration and model fallbacks
-├── config.js               # Default configurations for AI providers
-├── content.js              # Core logic for DOM scraping and in-page UI injection
-├── manifest.json           # Extension metadata and permission definitions
-├── marked.min.js           # Markdown rendering library for AI responses
-├── popup.html/js/css       # Extension toolbar popup interface
-└── README.md               # Project documentation
+```
+core/registry.js     list of supported sites; picks the right one for the current page
+sites/leetcode.js    everything that is specific to LeetCode (read problem, read/write code)
+sites/_template.js   copy this to add a new site
+content.js           the floating panel and buttons (same for every site)
+background.js        talks to OpenAI / Gemini
+popup.html/js/css    toolbar popup
+config.js            default model settings
 ```
 
-## 🛠 Technology Stack
+## Add a new site
 
--   **Language**: Vanilla JavaScript (ES6+), HTML5, CSS3.
--   **APIs**: Chrome Extensions API (Scripting, Storage, Messaging).
--   **AI Integration**: OpenAI Chat Completions API, Google Generative Language API (Gemini).
--   **Formatting**: Marked.js for high-quality markdown rendering in the assistant panel.
+1. Copy `sites/_template.js` to `sites/<site>.js` and fill in `getProblem`, `getCode` and `setCode`.
+2. In `manifest.json`, add the file to `content_scripts[0].js` (before `content.js`),
+   and add the site's URL to `host_permissions` and `content_scripts[0].matches`.
 
-## 🚀 Installation & Setup
+## Privacy
 
-### 1. Prerequisites
--   A Chromium-based browser (Chrome, Edge, Brave).
--   An API Key from OpenAI Platform or Google AI Studio.
+Your API key is stored in your browser. The problem text and your code are sent to the AI provider you choose (OpenAI or Google) to get an answer. Nothing is sent anywhere else.
 
-### 2. Manual Installation
-1.  Clone this repository:
-    ```bash
-    git clone https://github.com/your-username/LeetCode-AI-Assistant.git
-    ```
-2.  Open Chrome and navigate to `chrome://extensions/`.
-3.  Enable **Developer Mode** (toggle in the top right).
-4.  Click **Load unpacked** and select the project folder.
+## Fair use
 
-### 3. Configuration
-1.  Open any LeetCode problem (e.g., Two Sum).
-2.  Click the **AI** button on the right side of the page or the extension icon in the toolbar.
-3.  Select your preferred **Provider** (OpenAI or Gemini).
-4.  Paste your **API Key** and click **Save**.
+Many contests do not allow AI help while the contest is running. Use CodeHint AI for practice and learning, and follow each site's rules.
 
-## 📝 Environment Variables (Internal Storage)
+## License
 
-While this extension doesn't use a `.env` file for security (as it's a client-side bundle), it manages the following keys via `chrome.storage.sync`:
-
-| Key | Type | Description |
-| :--- | :--- | :--- |
-| `aiProvider` | `string` | `openai` or `gemini` |
-| `apiKey` | `string` | Encrypted/Private key for the chosen provider |
-
-## 🔄 Workflow
-
-1.  **Extraction**: When an action is clicked, `content.js` gathers problem data.
-2.  **Messaging**: The content script sends a message to `background.js` with the context.
-3.  **Inference**: `background.js` constructs a prompt and calls the LLM API.
-4.  **Rendering**: The background script returns the response; `content.js` renders it using `marked.min.js` and updates the floating panel.
-
-## 🛠 Troubleshooting
-
--   **Icon not showing?**: Refresh the LeetCode page. Ensure the URL matches `leetcode.com/problems/*`.
--   **Empty Response?**: Check your API quota and verify the API key is saved correctly in the settings tab.
--   **Code Insertion Fails?**: LeetCode's Monaco editor is complex. If automatic insertion fails, use the "Copy" button and paste manually.
--   **Provider Errors**: If you get a "Model not found" error, ensure your API key has access to the models specified in `config.js` (e.g., GPT-4o).
-
-## 🔮 Future Improvements
-
--   [ ] **Local LLM Support**: Integrate with Ollama for privacy-focused, local inference.
--   [ ] **History Tab**: Save previous AI suggestions per problem.
--   [ ] **Visual Debugging**: Trace variable values directly in the AI response.
--   [ ] **Multi-Language Support**: Expanded prompt engineering for niche languages like Rust or Go.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these steps:
-1.  Fork the project.
-2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`).
-3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4.  Push to the Branch (`git push origin feature/AmazingFeature`).
-5.  Open a Pull Request.
-
----
-*Disclaimer: This extension is intended for educational purposes. Use AI assistance responsibly and ensure you understand the solutions generated.*
+MIT

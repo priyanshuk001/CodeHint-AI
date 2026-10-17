@@ -50,14 +50,16 @@ document.addEventListener("DOMContentLoaded", function () {
 
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       const tab = tabs[0];
-      if (!tab?.url?.includes("leetcode.com/problems/")) {
-        showError("Open a LeetCode problem page first.");
+      if (!tab?.id) {
+        showError("Open a coding problem page first.");
         return;
       }
 
       getPageContext(tab.id, function (context) {
+        // The page script only runs on supported sites (see manifest.json),
+        // so no answer means: unsupported site, or the page needs a refresh.
         if (!context.problemDetails) {
-          showError("Could not read problem details. Refresh LeetCode and try again.");
+          showError("Could not read the problem. Open a problem page on a supported site and refresh it, then try again.");
           return;
         }
 

@@ -28,42 +28,77 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 document.addEventListener("DOMContentLoaded", injectAssistantShell);
 injectAssistantShell();
 
-let leetcodeAiState = {
+// ---------------------------------------------------------------------------
+// Site adapter bridge: the panel never reads a website directly.
+// It asks the adapter of the current site (see core/registry.js and sites/*.js).
+// ---------------------------------------------------------------------------
+function getSite() {
+  return window.CodeHintSites ? window.CodeHintSites.getActive() : null;
+}
+
+function extractProblemDetails() {
+  const site = getSite();
+  if (!site) return null;
+  const problem = site.getProblem();
+  return problem ? { ...problem, site: site.name } : problem;
+}
+
+function extractCurrentCode() {
+  const site = getSite();
+  return site ? site.getCode() : "";
+}
+
+function extractTestCases() {
+  const site = getSite();
+  return site && site.getTestCases ? site.getTestCases() : [];
+}
+
+function extractSubmissionResults() {
+  const site = getSite();
+  return site && site.getSubmissionResults ? site.getSubmissionResults() : null;
+}
+
+function insertCodeToEditor(code) {
+  const site = getSite();
+  return site ? site.setCode(code) : false;
+}
+
+let codeHintState = {
   lastResponse: "",
   lastModel: "",
 };
 
 /**
- * Injects a fixed assistant launcher and side panel on LeetCode problem pages.
+ * Injects a fixed assistant launcher and side panel on supported problem pages.
  */
 function injectAssistantShell() {
-  // Only inject on LeetCode problem pages
-  if (!window.location.href.includes("leetcode.com/problems/")) {
+  // Only inject on supported problem pages
+  if (!getSite()) {
     return;
   }
 
   // Check if the UI already exists to avoid duplicates
-  if (document.getElementById("leetcode-ai-assistant-button")) {
+  if (document.getElementById("codehint-assistant-button")) {
     return;
   }
 
   const styles = document.createElement("style");
-  styles.id = "leetcode-ai-assistant-styles";
+  styles.id = "codehint-assistant-styles";
   styles.textContent = `
     :root {
-      --lcai-bg: #f8fafc;
-      --lcai-surface: #ffffff;
-      --lcai-text: #172033;
-      --lcai-muted: #64748b;
-      --lcai-border: #dbe4ee;
-      --lcai-primary: #2563eb;
-      --lcai-primary-strong: #1d4ed8;
-      --lcai-accent: #0f766e;
-      --lcai-danger: #dc2626;
-      --lcai-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
+      --chai-bg: #f8fafc;
+      --chai-surface: #ffffff;
+      --chai-text: #172033;
+      --chai-muted: #64748b;
+      --chai-border: #dbe4ee;
+      --chai-primary: #2563eb;
+      --chai-primary-strong: #1d4ed8;
+      --chai-accent: #0f766e;
+      --chai-danger: #dc2626;
+      --chai-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
     }
 
-    #leetcode-ai-assistant-button {
+    #codehint-assistant-button {
       position: fixed;
       top: 146px;
       right: 22px;
@@ -83,34 +118,34 @@ function injectAssistantShell() {
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
-    #leetcode-ai-assistant-button:hover {
+    #codehint-assistant-button:hover {
       transform: translateY(-1px);
       box-shadow: 0 14px 34px rgba(37, 99, 235, 0.34);
     }
 
-    #leetcode-ai-assistant-button.leetcode-ai-open {
+    #codehint-assistant-button.codehint-open {
       background: #172033;
     }
 
-    .leetcode-ai-button-mark {
+    .codehint-button-mark {
       font-size: 20px;
       font-weight: 800;
       line-height: 1;
       letter-spacing: 0;
     }
 
-    #leetcode-ai-assistant-panel {
+    #codehint-assistant-panel {
       position: fixed;
       top: 140px;
       right: 82px;
       width: min(420px, calc(100vw - 28px));
       max-height: calc(100vh - 112px);
-      background: var(--lcai-surface);
-      border: 1px solid var(--lcai-border);
+      background: var(--chai-surface);
+      border: 1px solid var(--chai-border);
       border-radius: 8px;
-      box-shadow: var(--lcai-shadow);
+      box-shadow: var(--chai-shadow);
       z-index: 10000;
-      color: var(--lcai-text);
+      color: var(--chai-text);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       overflow: hidden;
       transform: translateY(-8px);
@@ -119,30 +154,30 @@ function injectAssistantShell() {
       transition: opacity 0.2s ease, transform 0.2s ease;
     }
 
-    #leetcode-ai-assistant-panel.leetcode-ai-open {
+    #codehint-assistant-panel.codehint-open {
       opacity: 1;
       transform: translateY(0);
       pointer-events: auto;
     }
 
-    .leetcode-ai-panel-header {
+    .codehint-panel-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
       padding: 14px 16px;
       background: #f8fafc;
-      border-bottom: 1px solid var(--lcai-border);
+      border-bottom: 1px solid var(--chai-border);
     }
 
-    .leetcode-ai-title {
+    .codehint-title {
       display: flex;
       align-items: center;
       gap: 10px;
       min-width: 0;
     }
 
-    .leetcode-ai-logo {
+    .codehint-logo {
       width: 30px;
       height: 30px;
       border-radius: 8px;
@@ -153,92 +188,92 @@ function injectAssistantShell() {
       font-weight: 800;
     }
 
-    .leetcode-ai-title strong {
+    .codehint-title strong {
       display: block;
       font-size: 14px;
       line-height: 18px;
-      color: var(--lcai-text);
+      color: var(--chai-text);
     }
 
-    .leetcode-ai-title span {
+    .codehint-title span {
       display: block;
       font-size: 12px;
       line-height: 16px;
-      color: var(--lcai-muted);
+      color: var(--chai-muted);
     }
 
-    .leetcode-ai-icon-button {
+    .codehint-icon-button {
       width: 32px;
       height: 32px;
       border: 1px solid transparent;
       border-radius: 8px;
       background: transparent;
-      color: var(--lcai-muted);
+      color: var(--chai-muted);
       display: grid;
       place-items: center;
       cursor: pointer;
       font-size: 18px;
     }
 
-    .leetcode-ai-icon-button:hover {
+    .codehint-icon-button:hover {
       background: #eaf0f7;
-      color: var(--lcai-text);
+      color: var(--chai-text);
     }
 
-    .leetcode-ai-panel-body {
+    .codehint-panel-body {
       padding: 14px 16px 16px;
       overflow: auto;
       max-height: calc(100vh - 176px);
-      background: var(--lcai-bg);
+      background: var(--chai-bg);
     }
 
-    .leetcode-ai-settings {
+    .codehint-settings {
       display: grid;
       grid-template-columns: 1fr;
       gap: 10px;
       margin-bottom: 14px;
     }
 
-    .leetcode-ai-field {
+    .codehint-field {
       display: grid;
       gap: 6px;
     }
 
-    .leetcode-ai-field label {
-      color: var(--lcai-muted);
+    .codehint-field label {
+      color: var(--chai-muted);
       font-size: 12px;
       font-weight: 700;
     }
 
-    .leetcode-ai-input-row {
+    .codehint-input-row {
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 8px;
     }
 
-    .leetcode-ai-field select,
-    .leetcode-ai-field input {
+    .codehint-field select,
+    .codehint-field input {
       min-height: 38px;
-      border: 1px solid var(--lcai-border);
+      border: 1px solid var(--chai-border);
       border-radius: 8px;
       background: #ffffff;
-      color: var(--lcai-text);
+      color: var(--chai-text);
       padding: 8px 10px;
       font-size: 13px;
       outline: none;
     }
 
-    .leetcode-ai-field select:focus,
-    .leetcode-ai-field input:focus {
-      border-color: var(--lcai-primary);
+    .codehint-field select:focus,
+    .codehint-field input:focus {
+      border-color: var(--chai-primary);
       box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
     }
 
-    .leetcode-ai-save {
+    .codehint-save {
       min-height: 38px;
       border: 0;
       border-radius: 8px;
-      background: var(--lcai-text);
+      background: var(--chai-text);
       color: #ffffff;
       padding: 0 12px;
       cursor: pointer;
@@ -246,39 +281,39 @@ function injectAssistantShell() {
       font-weight: 700;
     }
 
-    .leetcode-ai-actions {
+    .codehint-actions {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 8px;
       margin-bottom: 12px;
     }
 
-    .leetcode-ai-action {
+    .codehint-action {
       position: relative;
       min-height: 38px;
-      border: 1px solid var(--lcai-border);
+      border: 1px solid var(--chai-border);
       border-radius: 8px;
       background: #ffffff;
-      color: var(--lcai-text);
+      color: var(--chai-text);
       padding: 8px 6px;
       cursor: pointer;
       font-size: 13px;
       font-weight: 700;
     }
 
-    .leetcode-ai-action:hover {
+    .codehint-action:hover {
       border-color: rgba(37, 99, 235, 0.45);
-      color: var(--lcai-primary-strong);
+      color: var(--chai-primary-strong);
       background: #eef5ff;
     }
 
-    .leetcode-ai-action.active {
+    .codehint-action.active {
       border-color: transparent;
-      background: var(--lcai-primary);
+      background: var(--chai-primary);
       color: #ffffff;
     }
 
-    .leetcode-ai-action::after {
+    .codehint-action::after {
       content: attr(data-tooltip);
       position: absolute;
       left: 50%;
@@ -299,33 +334,33 @@ function injectAssistantShell() {
       z-index: 1;
     }
 
-    .leetcode-ai-action:hover::after {
+    .codehint-action:hover::after {
       opacity: 1;
       visibility: visible;
       transform: translateX(-50%) translateY(0);
     }
 
-    .leetcode-ai-response {
+    .codehint-response {
       min-height: 190px;
       max-height: 380px;
       overflow: auto;
-      border: 1px solid var(--lcai-border);
+      border: 1px solid var(--chai-border);
       border-radius: 8px;
       background: #ffffff;
       padding: 14px;
-      color: var(--lcai-text);
+      color: var(--chai-text);
       font-size: 13px;
       line-height: 1.55;
     }
 
-    .leetcode-ai-response.empty {
+    .codehint-response.empty {
       display: grid;
       place-items: center;
-      color: var(--lcai-muted);
+      color: var(--chai-muted);
       text-align: center;
     }
 
-    .leetcode-ai-response pre {
+    .codehint-response pre {
       position: relative;
       overflow: auto;
       background: #0f172a;
@@ -336,113 +371,113 @@ function injectAssistantShell() {
       line-height: 1.5;
     }
 
-    .leetcode-ai-response code {
+    .codehint-response code {
       font-family: "Cascadia Code", Consolas, monospace;
     }
 
-    .leetcode-ai-meta {
+    .codehint-meta {
       margin: 8px 0 0;
       min-height: 16px;
-      color: var(--lcai-muted);
+      color: var(--chai-muted);
       font-size: 12px;
     }
 
-    .leetcode-ai-footer-actions {
+    .codehint-footer-actions {
       display: flex;
       gap: 8px;
       margin-top: 12px;
     }
 
-    .leetcode-ai-secondary {
+    .codehint-secondary {
       flex: 1;
       min-height: 36px;
-      border: 1px solid var(--lcai-border);
+      border: 1px solid var(--chai-border);
       border-radius: 8px;
       background: #ffffff;
-      color: var(--lcai-text);
+      color: var(--chai-text);
       cursor: pointer;
       font-size: 13px;
       font-weight: 700;
     }
 
-    .leetcode-ai-secondary:hover {
+    .codehint-secondary:hover {
       background: #eef5ff;
       border-color: rgba(37, 99, 235, 0.45);
     }
 
-    .leetcode-ai-hidden {
+    .codehint-hidden {
       display: none !important;
     }
 
     @media (max-width: 768px) {
-      #leetcode-ai-assistant-button {
+      #codehint-assistant-button {
         top: 132px;
         right: 14px;
       }
 
-      #leetcode-ai-assistant-panel {
+      #codehint-assistant-panel {
         top: 186px;
         right: 14px;
       }
 
-      .leetcode-ai-actions {
+      .codehint-actions {
         grid-template-columns: repeat(2, 1fr);
       }
     }
   `;
 
   const launcher = document.createElement("button");
-  launcher.id = "leetcode-ai-assistant-button";
+  launcher.id = "codehint-assistant-button";
   launcher.type = "button";
-  launcher.title = "Toggle LeetCode AI Assistant";
-  launcher.innerHTML = `<span class="leetcode-ai-button-mark">AI</span>`;
+  launcher.title = "Toggle CodeHint AI";
+  launcher.innerHTML = `<span class="codehint-button-mark">AI</span>`;
 
   const panel = document.createElement("aside");
-  panel.id = "leetcode-ai-assistant-panel";
-  panel.setAttribute("aria-label", "LeetCode AI Assistant");
+  panel.id = "codehint-assistant-panel";
+  panel.setAttribute("aria-label", "CodeHint AI");
   panel.innerHTML = `
-    <div class="leetcode-ai-panel-header">
-      <div class="leetcode-ai-title">
-        <div class="leetcode-ai-logo">AI</div>
+    <div class="codehint-panel-header">
+      <div class="codehint-title">
+        <div class="codehint-logo">AI</div>
         <div>
-          <strong>LeetCode Assistant</strong>
+          <strong>CodeHint AI</strong>
           <span>Pick an action and keep coding</span>
         </div>
       </div>
-      <button class="leetcode-ai-icon-button" id="leetcode-ai-close" type="button" title="Close">x</button>
+      <button class="codehint-icon-button" id="codehint-close" type="button" title="Close">x</button>
     </div>
-    <div class="leetcode-ai-panel-body">
-      <div class="leetcode-ai-settings">
-        <div class="leetcode-ai-field">
-          <label for="leetcode-ai-provider">Model Provider</label>
-          <select id="leetcode-ai-provider">
+    <div class="codehint-panel-body">
+      <div class="codehint-settings">
+        <div class="codehint-field">
+          <label for="codehint-provider">Model Provider</label>
+          <select id="codehint-provider">
             <option value="gemini">Google Gemini</option>
             <option value="openai">OpenAI</option>
           </select>
         </div>
-        <div class="leetcode-ai-field">
-          <label for="leetcode-ai-api-key">API Key</label>
-          <div class="leetcode-ai-input-row">
-            <input id="leetcode-ai-api-key" type="password" placeholder="Paste API key" />
-            <button class="leetcode-ai-save" id="leetcode-ai-save" type="button">Save</button>
+        <div class="codehint-field">
+          <label for="codehint-api-key">API Key</label>
+          <div class="codehint-input-row">
+            <input id="codehint-api-key" type="password" placeholder="Paste API key" />
+            <button class="codehint-save" id="codehint-save" type="button">Save</button>
           </div>
         </div>
       </div>
-      <div class="leetcode-ai-actions">
-        <button class="leetcode-ai-action" type="button" data-ai-action="hint" data-tooltip="Gives a small clue without revealing the full solution.">Hint</button>
-        <button class="leetcode-ai-action" type="button" data-ai-action="approach" data-tooltip="Explains the algorithm idea, steps, and complexity.">Approach</button>
-        <button class="leetcode-ai-action" type="button" data-ai-action="solution" data-tooltip="Generates a complete code solution for the selected language.">Solution</button>
-        <button class="leetcode-ai-action" type="button" data-ai-action="optimize" data-tooltip="Improves your current code for speed, memory, and clarity.">Optimize</button>
-        <button class="leetcode-ai-action" type="button" data-ai-action="debug" data-tooltip="Finds mistakes in your current code and suggests a fix.">Debug</button>
-        <button class="leetcode-ai-action" type="button" data-ai-action="explain" data-tooltip="Breaks down the problem statement in simple words.">Explain</button>
+      <div class="codehint-actions">
+        <button class="codehint-action" type="button" data-ai-action="hint" data-tooltip="Gives a small clue without revealing the full solution.">Hint</button>
+        <button class="codehint-action" type="button" data-ai-action="approach" data-tooltip="Explains the algorithm idea, steps, and complexity.">Approach</button>
+        <button class="codehint-action" type="button" data-ai-action="solution" data-tooltip="Generates a complete code solution for the selected language.">Solution</button>
+        <button class="codehint-action" type="button" data-ai-action="optimize" data-tooltip="Improves your current code for speed, memory, and clarity.">Optimize</button>
+        <button class="codehint-action" type="button" data-ai-action="debug" data-tooltip="Finds mistakes in your current code and suggests a fix.">Debug</button>
+        <button class="codehint-action" type="button" data-ai-action="explain" data-tooltip="Breaks down the problem statement in simple words.">Explain</button>
       </div>
-      <div id="leetcode-ai-response" class="leetcode-ai-response empty">
+      <div id="codehint-response" class="codehint-response empty">
         Choose an action to generate help for this problem.
       </div>
-      <div id="leetcode-ai-meta" class="leetcode-ai-meta"></div>
-      <div class="leetcode-ai-footer-actions">
-        <button class="leetcode-ai-secondary" id="leetcode-ai-copy" type="button">Copy</button>
-        <button class="leetcode-ai-secondary" id="leetcode-ai-insert" type="button">Insert Code</button>
+      <div id="codehint-meta" class="codehint-meta"></div>
+      <div class="codehint-footer-actions">
+        <button class="codehint-secondary" id="codehint-copy" type="button">Copy</button>
+        <button class="codehint-secondary" id="codehint-insert" type="button">Insert Code</button>
       </div>
     </div>
   `;
@@ -452,10 +487,10 @@ function injectAssistantShell() {
   document.body.appendChild(panel);
 
   launcher.addEventListener("click", toggleAssistantPanel);
-  panel.querySelector("#leetcode-ai-close").addEventListener("click", closeAssistantPanel);
-  panel.querySelector("#leetcode-ai-save").addEventListener("click", saveAssistantSettings);
-  panel.querySelector("#leetcode-ai-copy").addEventListener("click", copyAssistantResponse);
-  panel.querySelector("#leetcode-ai-insert").addEventListener("click", insertAssistantCode);
+  panel.querySelector("#codehint-close").addEventListener("click", closeAssistantPanel);
+  panel.querySelector("#codehint-save").addEventListener("click", saveAssistantSettings);
+  panel.querySelector("#codehint-copy").addEventListener("click", copyAssistantResponse);
+  panel.querySelector("#codehint-insert").addEventListener("click", insertAssistantCode);
   panel.querySelectorAll("[data-ai-action]").forEach((button) => {
     button.addEventListener("click", () => runAssistantAction(button.dataset.aiAction));
   });
@@ -464,21 +499,21 @@ function injectAssistantShell() {
 }
 
 function toggleAssistantPanel() {
-  const panel = document.getElementById("leetcode-ai-assistant-panel");
-  const launcher = document.getElementById("leetcode-ai-assistant-button");
-  const isOpen = panel.classList.toggle("leetcode-ai-open");
-  launcher.classList.toggle("leetcode-ai-open", isOpen);
+  const panel = document.getElementById("codehint-assistant-panel");
+  const launcher = document.getElementById("codehint-assistant-button");
+  const isOpen = panel.classList.toggle("codehint-open");
+  launcher.classList.toggle("codehint-open", isOpen);
 }
 
 function closeAssistantPanel() {
-  document.getElementById("leetcode-ai-assistant-panel")?.classList.remove("leetcode-ai-open");
-  document.getElementById("leetcode-ai-assistant-button")?.classList.remove("leetcode-ai-open");
+  document.getElementById("codehint-assistant-panel")?.classList.remove("codehint-open");
+  document.getElementById("codehint-assistant-button")?.classList.remove("codehint-open");
 }
 
 function loadAssistantSettings() {
   chrome.storage.sync.get(["aiProvider", "apiKey"], function (settings) {
-    const provider = document.getElementById("leetcode-ai-provider");
-    const apiKey = document.getElementById("leetcode-ai-api-key");
+    const provider = document.getElementById("codehint-provider");
+    const apiKey = document.getElementById("codehint-api-key");
 
     if (provider && settings.aiProvider) provider.value = settings.aiProvider;
     if (apiKey && settings.apiKey) apiKey.value = settings.apiKey;
@@ -487,8 +522,8 @@ function loadAssistantSettings() {
 
 function getAssistantSettings() {
   return {
-    aiProvider: document.getElementById("leetcode-ai-provider")?.value || "gemini",
-    apiKey: document.getElementById("leetcode-ai-api-key")?.value || "",
+    aiProvider: document.getElementById("codehint-provider")?.value || "gemini",
+    apiKey: document.getElementById("codehint-api-key")?.value || "",
   };
 }
 
@@ -500,29 +535,29 @@ function saveAssistantSettings() {
 }
 
 function setAssistantLoading(message) {
-  const response = document.getElementById("leetcode-ai-response");
-  const meta = document.getElementById("leetcode-ai-meta");
+  const response = document.getElementById("codehint-response");
+  const meta = document.getElementById("codehint-meta");
   response.classList.add("empty");
   response.textContent = message;
   if (meta) meta.textContent = "";
 }
 
 function setAssistantResponse(content, model) {
-  leetcodeAiState.lastResponse = content || "";
-  leetcodeAiState.lastModel = model || "";
+  codeHintState.lastResponse = content || "";
+  codeHintState.lastModel = model || "";
 
-  const response = document.getElementById("leetcode-ai-response");
-  const meta = document.getElementById("leetcode-ai-meta");
+  const response = document.getElementById("codehint-response");
+  const meta = document.getElementById("codehint-meta");
   response.classList.remove("empty");
   response.innerHTML = formatAssistantMarkdown(content || "No response received.");
   if (meta) meta.textContent = model ? `Generated by ${model}` : "";
 }
 
 function setAssistantError(message) {
-  const response = document.getElementById("leetcode-ai-response");
-  const meta = document.getElementById("leetcode-ai-meta");
+  const response = document.getElementById("codehint-response");
+  const meta = document.getElementById("codehint-meta");
   response.classList.remove("empty");
-  response.innerHTML = `<strong style="color: var(--lcai-danger);">Error</strong><p>${escapeHtml(message)}</p>`;
+  response.innerHTML = `<strong style="color: var(--chai-danger);">Error</strong><p>${escapeHtml(message)}</p>`;
   if (meta) meta.textContent = "";
 }
 
@@ -540,19 +575,19 @@ function formatAssistantMarkdown(content) {
 }
 
 function copyAssistantResponse() {
-  if (!leetcodeAiState.lastResponse) {
+  if (!codeHintState.lastResponse) {
     showNotification("Nothing to copy yet.", "warning");
     return;
   }
 
-  navigator.clipboard.writeText(leetcodeAiState.lastResponse).then(
+  navigator.clipboard.writeText(codeHintState.lastResponse).then(
     () => showNotification("Response copied.", "success"),
     () => showNotification("Could not copy response.", "error")
   );
 }
 
 function insertAssistantCode() {
-  const code = extractFirstCodeBlock(leetcodeAiState.lastResponse);
+  const code = extractFirstCodeBlock(codeHintState.lastResponse);
   if (!code) {
     showNotification("No code block found in the response.", "warning");
     return;
@@ -626,7 +661,7 @@ function runAssistantAction(action) {
 }
 
 function setActiveAssistantAction(action) {
-  document.querySelectorAll("#leetcode-ai-assistant-panel [data-ai-action]").forEach((button) => {
+  document.querySelectorAll("#codehint-assistant-panel [data-ai-action]").forEach((button) => {
     button.classList.toggle("active", button.dataset.aiAction === action);
   });
 }
@@ -653,783 +688,6 @@ function escapeHtml(unsafe) {
     .replace(/'/g, "&#039;");
 }
 
-/**
- * Extract problem details from the LeetCode page
- */
-function extractProblemDetails() {
-  try {
-    // Extract problem title - Updated with multiple selector attempts
-    let titleElement = document.querySelector('[data-cy="question-title"]');
-
-    // If the standard selector doesn't work, try alternate selectors
-    if (!titleElement || !titleElement.textContent) {
-      // Try to find the title in the new UI structure
-      titleElement = document.querySelector(".text-title-large a");
-
-      // Additional fallbacks
-      if (!titleElement || !titleElement.textContent) {
-        titleElement = document.querySelector(
-          'div[class*="title"] a[href*="/problems/"]'
-        );
-      }
-
-      if (!titleElement || !titleElement.textContent) {
-        const headings = document.querySelectorAll("h1, h2, h3, h4");
-        for (const heading of headings) {
-          if (heading.textContent && heading.textContent.includes(".")) {
-            titleElement = heading;
-            break;
-          }
-        }
-      }
-    }
-
-    const title = titleElement
-      ? titleElement.textContent.trim()
-      : "Unknown Problem";
-
-    // Extract problem ID and slug
-    const urlPath = window.location.pathname;
-    const problemSlug = urlPath.split("/problems/")[1]?.split("/")[0] || "";
-    const problemId =
-      document.querySelector(".mr-4 .text-label-1")?.textContent || "";
-
-    // Extract difficulty
-    let difficultyElement =
-      document.querySelector("[diff]") ||
-      document.querySelector(
-        ".relative.inline-flex.items-center.justify-center.text-caption.px-2.py-1.gap-1.rounded-full.bg-fill-secondary"
-      );
-
-    // Additional selectors for difficulty
-    if (!difficultyElement) {
-      // Try newer UI selectors
-      difficultyElement = document.querySelector("[data-difficulty]");
-
-      if (!difficultyElement) {
-        // Look for text containing difficulty keywords
-        const difficultyTexts = ["Easy", "Medium", "Hard"];
-        const allElements = document.querySelectorAll("div, span");
-
-        for (const element of allElements) {
-          const text = element.textContent.trim();
-          if (difficultyTexts.some((diff) => text === diff)) {
-            difficultyElement = element;
-            break;
-          }
-        }
-      }
-    }
-
-    let difficulty = "Unknown";
-    if (difficultyElement) {
-      const diffText = difficultyElement.textContent.trim();
-      if (diffText.includes("Easy") || diffText === "Easy") difficulty = "Easy";
-      else if (diffText.includes("Medium") || diffText === "Medium")
-        difficulty = "Medium";
-      else if (diffText.includes("Hard") || diffText === "Hard")
-        difficulty = "Hard";
-      else difficulty = diffText;
-    }
-
-    // Extract problem description
-    let descriptionElement =
-      document.querySelector('[data-cy="question-content"]') ||
-      document.querySelector(".elfjS");
-
-    // Additional selectors for description
-    if (!descriptionElement || !descriptionElement.textContent) {
-      // Try newer UI selectors
-      descriptionElement = document.querySelector(".description");
-
-      if (!descriptionElement) {
-        // Try to find content div near the title
-        const contentContainer = document.querySelector(
-          'div[class*="content"]'
-        );
-        if (contentContainer) {
-          // Find the main content area that's likely to contain the description
-          const contentDivs =
-            contentContainer.querySelectorAll("div > div > div");
-          for (const div of contentDivs) {
-            // Look for a div with substantial text content
-            if (
-              div.textContent &&
-              div.textContent.length > 100 &&
-              !div.querySelector("textarea, input")
-            ) {
-              descriptionElement = div;
-              break;
-            }
-          }
-        }
-      }
-
-      // Last resort - find the largest text block after the title
-      if (!descriptionElement && titleElement) {
-        const allParagraphs = document.querySelectorAll("p");
-        let largestTextBlock = null;
-        let maxLength = 0;
-
-        for (const p of allParagraphs) {
-          if (p.textContent && p.textContent.length > maxLength) {
-            largestTextBlock = p;
-            maxLength = p.textContent.length;
-          }
-        }
-
-        if (largestTextBlock && maxLength > 50) {
-          descriptionElement = largestTextBlock;
-        }
-      }
-    }
-
-    const description = descriptionElement
-      ? descriptionElement.textContent.trim()
-      : "No description available";
-
-    // Extract examples
-    const examples = [];
-    const exampleBlocks =
-      document.querySelectorAll('[data-cy="question-content"] pre') ||
-      document.querySelectorAll(".elfjS pre");
-    exampleBlocks.forEach((block, index) => {
-      examples.push({
-        id: index + 1,
-        content: block.textContent.trim(),
-      });
-    });
-
-    // Extract constraints
-    let constraintsText = "";
-    if (description.includes("Constraints:")) {
-      const constraintsPart = description.split("Constraints:")[1];
-      constraintsText = constraintsPart.split("Follow-up:")[0].trim();
-    }
-
-    // Extract topics/tags
-    const topics = [];
-    const topicElements = document.querySelectorAll('a[href^="/tag/"]');
-    topicElements.forEach((element) => {
-      topics.push(element.textContent.trim());
-    });
-
-    // Extract function signature and starter code
-    const codeEditorContent = extractCodeEditorContent();
-    const selectedLanguage = detectSelectedEditorLanguage();
-    const { functionSignature, starterCode, language: parsedLanguage } =
-      parseCodeEditorContent(codeEditorContent);
-    const language = selectedLanguage || parsedLanguage;
-
-    // Create the final result object
-    const problemDetails = {
-      id: problemId,
-      slug: problemSlug,
-      title,
-      difficulty,
-      description,
-      examples,
-      constraints: constraintsText,
-      topics,
-      functionSignature,
-      starterCode,
-      language,
-    };
-
-    // Add debug logging
-    console.log("LeetCode AI Assistant - Extracted problem details:", {
-      title,
-      difficulty,
-      language,
-      description: description.substring(0, 100) + "...", // Truncate for logging
-    });
-
-    return problemDetails;
-  } catch (error) {
-    console.error("Error extracting problem details:", error);
-    // Log the error details for debugging
-    console.error("Error stack:", error.stack);
-    return null;
-  }
-}
-
-/**
- * Extract the content from the code editor
- */
-function extractCodeEditorContent() {
-  // Try multiple selectors to find the code editor
-  const editorSelectors = [
-    ".monaco-editor .view-lines",
-    ".CodeMirror-code",
-    "[data-mode-id]",
-    ".view-lines",
-  ];
-
-  for (const selector of editorSelectors) {
-    const editorElement = document.querySelector(selector);
-    if (editorElement) {
-      return editorElement.textContent;
-    }
-  }
-
-  // Fallback to getting all monaco editor content
-  const monacoEditors = document.querySelectorAll(".monaco-editor");
-  if (monacoEditors.length > 0) {
-    return monacoEditors[0].textContent;
-  }
-
-  return "";
-}
-
-/**
- * Parse the code editor content to extract function signature and starter code
- */
-function parseCodeEditorContent(content) {
-  if (!content) return { functionSignature: "", starterCode: "", language: "" };
-
-  const lines = content.split("\n").filter((line) => line.trim() !== "");
-  let functionSignature = "";
-  let language = "";
-
-  // Look for function signature based on language patterns
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-
-    // JavaScript/TypeScript function
-    if (line.includes("function") && line.includes("(")) {
-      functionSignature = line;
-      language = "javascript";
-      break;
-    }
-    // Python def
-    else if (line.startsWith("def ") && line.includes("(")) {
-      functionSignature = line;
-      language = "python";
-      break;
-    }
-    // C++ class method
-    else if (
-      line.includes("class") &&
-      lines[i + 1] &&
-      lines[i + 1].includes("public:")
-    ) {
-      language = "cpp";
-      for (let j = i + 1; j < lines.length; j++) {
-        if (
-          lines[j].includes("(") &&
-          !lines[j].includes(";") &&
-          !lines[j].includes("public:") &&
-          !lines[j].includes("private:")
-        ) {
-          functionSignature = lines[j].trim();
-          break;
-        }
-      }
-      if (functionSignature) break;
-    }
-    // Java/C++ method
-    else if (
-      (line.includes("public") ||
-        line.includes("private") ||
-        line.includes("protected")) &&
-      line.includes("(") &&
-      !line.includes(";")
-    ) {
-      if (
-        content.includes("public:") ||
-        content.includes("#include") ||
-        content.includes("std::") ||
-        content.includes("vector<")
-      ) {
-        language = "cpp";
-      } else {
-        language = "java";
-      }
-      functionSignature = line;
-      break;
-    }
-  }
-
-  // If we still couldn't determine the language, try to guess based on content
-  if (!language) {
-    if (
-      content.includes("function") &&
-      (content.includes("var") ||
-        content.includes("let") ||
-        content.includes("const"))
-    ) {
-      language = "javascript";
-    } else if (content.includes("def ") && content.includes("return")) {
-      language = "python";
-    } else if (
-      content.includes("public class") ||
-      content.includes("private class")
-    ) {
-      language = "java";
-    } else if (content.includes("cout") || content.includes("vector<")) {
-      language = "cpp";
-    }
-  }
-
-  return {
-    functionSignature,
-    starterCode: lines.join("\n"),
-    language,
-  };
-}
-
-function detectSelectedEditorLanguage() {
-  const selectors = [
-    '[data-e2e-locator="console-select-language"]',
-    '[data-cy="lang-select"]',
-    'button[aria-haspopup="listbox"]',
-    'button[aria-haspopup="menu"]',
-    ".language-btn.selected",
-    '[data-cy="code-tab"][aria-selected="true"]',
-  ];
-
-  for (const selector of selectors) {
-    const elements = document.querySelectorAll(selector);
-    for (const element of elements) {
-      const language = normalizeLanguageName(element.textContent);
-      if (language) return language;
-    }
-  }
-
-  const possibleControls = document.querySelectorAll(
-    "button, [role='button'], [aria-label], [title]"
-  );
-
-  for (const element of possibleControls) {
-    const text = [
-      element.textContent,
-      element.getAttribute("aria-label"),
-      element.getAttribute("title"),
-    ]
-      .filter(Boolean)
-      .join(" ");
-    const language = normalizeLanguageName(text);
-    if (language) return language;
-  }
-
-  return "";
-}
-
-function normalizeLanguageName(text) {
-  const value = String(text || "").toLowerCase().replace(/\s+/g, " ").trim();
-
-  if (!value) return "";
-  if (value.includes("c++") || value.includes("cpp")) return "C++";
-  if (value.includes("python3") || value.includes("python")) return "Python";
-  if (value.includes("typescript")) return "TypeScript";
-  if (value.includes("javascript")) return "JavaScript";
-  if (value.includes("java") && !value.includes("javascript")) return "Java";
-  if (value.includes("c#") || value.includes("csharp")) return "C#";
-  if (value.includes("golang") || value === "go" || value.includes(" go ")) return "Go";
-  if (value.includes("rust")) return "Rust";
-  if (value.includes("kotlin")) return "Kotlin";
-  if (value.includes("swift")) return "Swift";
-  if (value.includes("php")) return "PHP";
-  if (value.includes("ruby")) return "Ruby";
-
-  return "";
-}
-
-/**
- * Extract current code from the editor
- */
-function extractCurrentCode() {
-  try {
-    // Try to get code from Monaco editor
-    const editorContent = extractCodeEditorContent();
-    if (editorContent) {
-      return editorContent;
-    }
-
-    // Try to find the textarea or pre element that contains the code
-    const textareas = document.querySelectorAll("textarea");
-    for (const textarea of textareas) {
-      if (textarea.value && textarea.value.length > 0) {
-        return textarea.value;
-      }
-    }
-
-    // Try to find code in the DOM structure specific to LeetCode
-    const codeLines = document.querySelectorAll(".view-line");
-    if (codeLines.length > 0) {
-      return Array.from(codeLines)
-        .map((line) => line.textContent)
-        .join("\n");
-    }
-
-    return "";
-  } catch (error) {
-    console.error("Error extracting current code:", error);
-    return "";
-  }
-}
-
-/**
- * Extract test cases from the LeetCode page
- */
-function extractTestCases() {
-  try {
-    const testCases = [];
-
-    // Try to find test cases in the testcase tab (new UI with flexlayout)
-    const testcaseTab = document.getElementById("testcase_tab");
-    if (testcaseTab) {
-      // Find the testcase content area
-      const testcaseContent = document.querySelector(".flexlayout__tabset_content");
-
-      // If we found the tab content area, look for the test case input
-      if (testcaseContent) {
-        const testcaseInput = testcaseContent.querySelector("textarea, [contenteditable='true']");
-        if (testcaseInput && testcaseInput.value) {
-          testCases.push({
-            id: "testcase_1",
-            input: testcaseInput.value.trim()
-          });
-        } else if (testcaseInput && testcaseInput.textContent) {
-          testCases.push({
-            id: "testcase_1",
-            input: testcaseInput.textContent.trim()
-          });
-        }
-      }
-
-      // If we couldn't find the test case in the content area, try other selectors
-      if (testCases.length === 0) {
-        // Try to find any textarea or editable div in the testcase area
-        const testcaseInputs = document.querySelectorAll("textarea, [contenteditable='true']");
-        for (const input of testcaseInputs) {
-          const inputValue = input.value || input.textContent;
-          if (inputValue && inputValue.trim()) {
-            testCases.push({
-              id: `testcase_${testCases.length + 1}`,
-              input: inputValue.trim()
-            });
-          }
-        }
-      }
-    }
-
-    // Try to find test cases in the testcase tab (alternative UI)
-    if (testCases.length === 0) {
-      const testcaseTab = document.querySelector(
-        '[data-e2e-locator="console-tab-testcase"]'
-      );
-      if (testcaseTab) {
-        const testcaseInputs = document.querySelectorAll(
-          '[data-e2e-locator="console-testcase-input"]'
-        );
-        if (testcaseInputs.length > 0) {
-          const testCase = {};
-          testcaseInputs.forEach((inputElement) => {
-            try {
-              // Find the label associated with the input
-              const container = inputElement.closest(
-                ".flex.h-full.w-full.flex-col.space-y-2"
-              );
-              const labelElement = container
-                ? container.querySelector(".text-xs.font-medium")
-                : null;
-
-              if (labelElement) {
-                const key = labelElement.textContent.replace("=", "").trim();
-                testCase[key] = inputElement.textContent.trim();
-              } else {
-                console.warn(
-                  "Could not find label for testcase input:",
-                  inputElement
-                );
-              }
-            } catch (labelError) {
-              console.error(
-                "Error processing single testcase input:",
-                labelError,
-                inputElement
-              );
-            }
-          });
-
-          if (Object.keys(testCase).length > 0) {
-            testCases.push(testCase);
-          }
-        }
-      }
-    }
-
-    // Try to find test cases in the description's examples (older UI / problem view)
-    if (testCases.length === 0) {
-      const exampleContainer =
-        document.querySelector('[data-cy="question-content"]') ||
-        document.querySelector(".elfjS");
-      if (exampleContainer) {
-        const examples = exampleContainer.querySelectorAll("pre"); // Examples are often in <pre> tags
-        examples.forEach((exampleBlock, index) => {
-          try {
-            const text = exampleBlock.textContent.trim();
-            const inputMatch = text.match(/Input:\s*([\s\S]*?)(?:Output:|$)/i);
-            const outputMatch = text.match(
-              /Output:\s*([\s\S]*?)(?:Explanation:|$)/i
-            );
-
-            if (inputMatch && inputMatch[1] && outputMatch && outputMatch[1]) {
-              const inputText = inputMatch[1].trim();
-              const outputText = outputMatch[1].trim();
-              testCases.push({
-                id: `example_${index + 1}`,
-                input: inputText,
-                output: outputText,
-              });
-            }
-          } catch (exampleError) {
-            console.error(
-              `Error parsing example ${index + 1}:`,
-              exampleError,
-              exampleBlock
-            );
-          }
-        });
-      }
-    }
-
-    // Log the extracted test cases for debugging
-    console.log("LeetCode AI Assistant - Extracted test cases:", testCases);
-
-    return testCases;
-  } catch (error) {
-    // Log the specific error type and message
-    console.error(
-      `Error extracting test cases (${error.name}): ${error.message}`
-    );
-    console.error("Error stack:", error.stack);
-    return []; // Return empty array on failure
-  }
-}
-
-/**
- * Extract submission results from the LeetCode page
- */
-function extractSubmissionResults() {
-  try {
-    // Try to find submission results in the new UI with flexlayout
-    const resultTab = document.getElementById("result_tab");
-    if (resultTab) {
-      // Check if the result tab is selected
-      const isResultTabSelected = document.querySelector(".flexlayout__tab_button--selected #result_tab");
-
-      // If the result tab is not selected, we need to click it to see the results
-      if (!isResultTabSelected && resultTab.closest(".flexlayout__tab_button")) {
-        resultTab.closest(".flexlayout__tab_button").click();
-      }
-
-      // Find the result content area
-      const resultContent = document.querySelector(".flexlayout__tabset_content");
-      if (resultContent) {
-        const resultText = resultContent.textContent.trim();
-
-        // Check for success or error messages
-        const isSuccess =
-          resultText.includes("Accepted") ||
-          resultText.includes("Success") ||
-          resultText.includes("Output:") ||
-          resultText.includes("Expected:") && resultText.includes("Output:") && !resultText.includes("Wrong Answer");
-
-        const isError =
-          resultText.includes("Error") ||
-          resultText.includes("Wrong Answer") ||
-          resultText.includes("Runtime Error") ||
-          resultText.includes("Time Limit Exceeded");
-
-        // Try to extract runtime and memory information
-        const runtimeMatch = resultText.match(/Runtime:\s*([\d.]+\s*[a-z]+)/i);
-        const memoryMatch = resultText.match(/Memory:\s*([\d.]+\s*[a-z]+)/i);
-
-        const runtime = runtimeMatch ? runtimeMatch[1] : "";
-        const memory = memoryMatch ? memoryMatch[1] : "";
-
-        // Try to extract error details
-        let errorMessage = "";
-        if (isError) {
-          // Look for specific error patterns
-          const errorPatterns = [
-            /Wrong Answer([\s\S]*?)(?=Runtime:|$)/i,
-            /Runtime Error([\s\S]*?)(?=Runtime:|$)/i,
-            /Time Limit Exceeded([\s\S]*?)(?=Runtime:|$)/i
-          ];
-
-          for (const pattern of errorPatterns) {
-            const match = resultText.match(pattern);
-            if (match && match[1]) {
-              errorMessage = match[1].trim();
-              break;
-            }
-          }
-
-          // If no specific pattern matched, use a general approach
-          if (!errorMessage) {
-            // Try to extract the part between the error type and runtime info
-            const errorStart = Math.max(
-              resultText.indexOf("Wrong Answer"),
-              resultText.indexOf("Runtime Error"),
-              resultText.indexOf("Time Limit Exceeded")
-            );
-
-            if (errorStart !== -1) {
-              const runtimeStart = resultText.indexOf("Runtime:");
-              if (runtimeStart !== -1 && runtimeStart > errorStart) {
-                errorMessage = resultText.substring(errorStart, runtimeStart).trim();
-              } else {
-                errorMessage = resultText.substring(errorStart).trim();
-              }
-            }
-          }
-        }
-
-        return {
-          status: isSuccess ? "success" : isError ? "error" : "unknown",
-          message: resultText,
-          errorDetails: errorMessage,
-          runtime,
-          memory,
-        };
-      }
-    }
-
-    // Try the alternative UI if the new UI didn't work
-    const resultElement = document.querySelector(
-      '[data-e2e-locator="console-result"]'
-    );
-    if (resultElement) {
-      const result = resultElement.textContent.trim();
-
-      // Check for success or error messages
-      const isSuccess =
-        result.includes("Accepted") || result.includes("Success");
-      const isError =
-        result.includes("Error") || result.includes("Wrong Answer");
-
-      // Get detailed error message if available
-      const errorDetails =
-        document.querySelector(".text-red-60") ||
-        document.querySelector(".text-red-s");
-      const errorMessage = errorDetails ? errorDetails.textContent.trim() : "";
-
-      // Get runtime and memory usage if available
-      const runtimeElement = document.querySelector('div:contains("Runtime:")');
-      const memoryElement = document.querySelector('div:contains("Memory:")');
-
-      const runtime = runtimeElement ? runtimeElement.textContent.trim() : "";
-      const memory = memoryElement ? memoryElement.textContent.trim() : "";
-
-      return {
-        status: isSuccess ? "success" : isError ? "error" : "unknown",
-        message: result,
-        errorDetails: errorMessage,
-        runtime,
-        memory,
-      };
-    }
-
-    // Log that we couldn't find any results
-    console.log("LeetCode AI Assistant - No submission results found");
-    return null;
-  } catch (error) {
-    console.error("Error extracting submission results:", error);
-    console.error("Error stack:", error.stack);
-    return null;
-  }
-}
-
-/**
- * Insert code into the LeetCode editor
- */
-function insertCodeToEditor(code) {
-  try {
-    // Try multiple approaches to insert code into the editor
-
-    // 1. Try to find the textarea and update its value
-    const textareas = document.querySelectorAll("textarea");
-    for (const textarea of textareas) {
-      if (textarea.value && textarea.value.length > 0) {
-        // Save the original value in case we need to restore it
-        const originalValue = textarea.value;
-
-        // Update the textarea value
-        textarea.value = code;
-
-        // Dispatch input event to trigger Monaco editor update
-        const event = new Event("input", { bubbles: true });
-        textarea.dispatchEvent(event);
-
-        // If successful, return true
-        return true;
-      }
-    }
-
-    // 2. Try to use Monaco editor's model if available
-    if (window.monaco && window.monaco.editor) {
-      const editors = window.monaco.editor.getEditors();
-      if (editors.length > 0) {
-        const model = editors[0].getModel();
-        if (model) {
-          const fullRange = model.getFullModelRange();
-          editors[0].executeEdits("extension", [
-            {
-              range: fullRange,
-              text: code,
-            },
-          ]);
-          return true;
-        }
-      }
-    }
-
-    // 3. Try to use document.execCommand as a fallback
-    const selection = window.getSelection();
-    if (selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      range.deleteContents();
-      range.insertNode(document.createTextNode(code));
-      return true;
-    }
-
-    // 4. Try to find the editor element and simulate typing
-    const editorElement = document.querySelector(".monaco-editor");
-    if (editorElement) {
-      // Focus the editor
-      editorElement.click();
-
-      // Try to select all existing text (Ctrl+A)
-      const selectAllEvent = new KeyboardEvent("keydown", {
-        key: "a",
-        code: "KeyA",
-        ctrlKey: true,
-        bubbles: true,
-      });
-      editorElement.dispatchEvent(selectAllEvent);
-
-      // Simulate pasting the code
-      const clipboardData = new DataTransfer();
-      clipboardData.setData("text/plain", code);
-
-      const pasteEvent = new ClipboardEvent("paste", {
-        clipboardData: clipboardData,
-        bubbles: true,
-      });
-      editorElement.dispatchEvent(pasteEvent);
-
-      return true;
-    }
-
-    return false;
-  } catch (error) {
-    console.error("Error inserting code:", error);
-    return false;
-  }
-}
 
 /**
  * Shows a toast notification on the page
@@ -1437,11 +695,11 @@ function insertCodeToEditor(code) {
 function showNotification(message, type = "info") {
   // Check if notification container exists, if not create it
   let notificationContainer = document.getElementById(
-    "leetcode-ai-notification-container"
+    "codehint-notification-container"
   );
   if (!notificationContainer) {
     notificationContainer = document.createElement("div");
-    notificationContainer.id = "leetcode-ai-notification-container";
+    notificationContainer.id = "codehint-notification-container";
     notificationContainer.style.cssText = `
       position: fixed;
       top: 20px;
@@ -1456,7 +714,7 @@ function showNotification(message, type = "info") {
 
   // Create notification element
   const notification = document.createElement("div");
-  notification.className = `leetcode-ai-notification leetcode-ai-notification-${type}`;
+  notification.className = `codehint-notification codehint-notification-${type}`;
   notification.style.cssText = `
     padding: 12px 16px;
     background-color: #333;
@@ -1470,7 +728,7 @@ function showNotification(message, type = "info") {
     align-items: center;
     justify-content: space-between;
     max-width: 300px;
-    animation: leetcodeAiSlideIn 0.3s ease;
+    animation: codeHintSlideIn 0.3s ease;
     border-left: 4px solid #0a84ff;
   `;
 
@@ -1486,7 +744,7 @@ function showNotification(message, type = "info") {
   // Create notification content
   notification.innerHTML = `
     <div>${message}</div>
-    <div class="leetcode-ai-notification-close" style="cursor: pointer; margin-left: 12px;">✕</div>
+    <div class="codehint-notification-close" style="cursor: pointer; margin-left: 12px;">✕</div>
   `;
 
   // Add to container
@@ -1494,10 +752,10 @@ function showNotification(message, type = "info") {
 
   // Add close button functionality
   const closeButton = notification.querySelector(
-    ".leetcode-ai-notification-close"
+    ".codehint-notification-close"
   );
   closeButton.addEventListener("click", () => {
-    notification.style.animation = "leetcodeAiSlideOut 0.3s ease forwards";
+    notification.style.animation = "codeHintSlideOut 0.3s ease forwards";
     setTimeout(() => {
       if (notification.parentNode) {
         notification.parentNode.removeChild(notification);
@@ -1508,7 +766,7 @@ function showNotification(message, type = "info") {
   // Auto remove after 5 seconds
   setTimeout(() => {
     if (notification.parentNode) {
-      notification.style.animation = "leetcodeAiSlideOut 0.3s ease forwards";
+      notification.style.animation = "codeHintSlideOut 0.3s ease forwards";
       setTimeout(() => {
         if (notification.parentNode) {
           notification.parentNode.removeChild(notification);
@@ -1518,15 +776,15 @@ function showNotification(message, type = "info") {
   }, 5000);
 
   // Add animation styles if not already added
-  if (!document.getElementById("leetcode-ai-notification-styles")) {
+  if (!document.getElementById("codehint-notification-styles")) {
     const style = document.createElement("style");
-    style.id = "leetcode-ai-notification-styles";
+    style.id = "codehint-notification-styles";
     style.textContent = `
-      @keyframes leetcodeAiSlideIn {
+      @keyframes codeHintSlideIn {
         from { transform: translateX(100%); opacity: 0; }
         to { transform: translateX(0); opacity: 1; }
       }
-      @keyframes leetcodeAiSlideOut {
+      @keyframes codeHintSlideOut {
         from { transform: translateX(0); opacity: 1; }
         to { transform: translateX(100%); opacity: 0; }
       }
